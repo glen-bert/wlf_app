@@ -1,6 +1,7 @@
 import streamlit as st
 import numpy as np
 import pandas as pd
+import plotly.graph_objs as go
 from tensorflow.keras.models import load_model
 from sklearn.preprocessing import MinMaxScaler
 
@@ -48,6 +49,7 @@ uploaded_file = st.file_uploader("Upload CSV File", type="csv")
 if uploaded_file is not None:
     try:
         df = pd.read_csv(uploaded_file)
+        df['datetime'] = pd.to_datetime(df['datetime'], format='%d/%m/%Y %H:%M')
 
         # Select a parameter for prediction
         parameter = st.selectbox(
@@ -76,15 +78,42 @@ if uploaded_file is not None:
                 # Inverse scale predictions
                 predicted_values = scaler.inverse_transform(np.array(predictions).reshape(-1, 1)).flatten()
 
+                # Create a new time inder the next 24 hours
+                last_time = pd.to_datetime(df['datetime'].values[-1])
+                future_times = [last_time + pd.Timedelta(hours=i) for i in range (1,25)]
+
                 # Display results
                 st.write(f"### Predicted Levels for Next 24 Hours of {parameter}")
-                result_df = pd.DataFrame({
-                    "Hour": list(range(1, 25)),
+                prediction_df = pd.DataFrame({
+                    'datetime': pd.to_datetime(future_times),
                     "Predicted Level": predicted_values
                 })
-                st.dataframe(result_df, width=800, height=400)
+                st.dataframe(prediction_df, width=800, height=400)
 
-                st.line_chart(predicted_values)
+                #combine original dataframe with predictions
+                df_combined = pd.concat([df, prediction_df[['datetime', 'Predicted Level']]]).reset_index(drop=True)
+                df_combined.set_index('datetime', inplace=True)
+
+                #Update line chart to include both historical and preducted values
+                df_combined_ = df_combined.tail(120)
+                st.write(f"### Actual for the last 120 hours and Predicted Water Level for Next 24 Hours of {parameter}")
+               
+                df_combined_ = df_combined.tail(120)
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=df_combined_.index, y=df_combined_[parameter], mode='lines', name=f'Historical {parameter}', line=dict(color='blue')))
+                fig.add_trace(go.Scatter(x=df_combined_.index, y=df_combined_['Predicted Level'], mode='lines', name='Predicted Level', line=dict(color='orange')))
+                fig.update_layout(title=f'Water Level Forecasting for {parameter}'
+                                  , xaxis_title='Datetime'
+                                  , yaxis_title ='Water Level'
+                                  , xaxis_tickangle=-45,
+                                  legend=dict(
+                                        yanchor="top",
+                                        xanchor="right",
+                                    ))
+
+                # Display the plot in Streamlit
+                st.plotly_chart(fig)
+    
 
     except Exception as e:
         st.error(f"An error occurred: {e}")
